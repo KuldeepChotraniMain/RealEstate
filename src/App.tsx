@@ -1,36 +1,33 @@
-
-import Sider from 'antd/es/layout/Sider';
-import './App.css'
-import {Button, Layout, Menu, Table } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import { Layout, Menu, Button, Modal, Spin, message } from 'antd';
+import { useMediaQuery } from '@mui/material';
 import {
-  UserOutlined,
-  VideoCameraOutlined,
-  UploadOutlined,
-  BarChartOutlined,
-  CloudOutlined,
-  AppstoreOutlined,
-  TeamOutlined,
-  ShopOutlined,
   MenuUnfoldOutlined,
   MenuFoldOutlined,
+  AppstoreOutlined,
+  BarChartOutlined,
+  TeamOutlined,
+  EditOutlined,
   SettingOutlined,
+  LogoutOutlined,
 } from '@ant-design/icons';
-import { CSSProperties, useState } from 'react';
-import { Content, Footer, Header } from 'antd/es/layout/layout';
-import { ColumnType } from 'antd/es/table';
-import { useMediaQuery } from '@mui/material';
+import Login from './components/Login/Login';
+import Home from './components/Home/Home';
+import Analytics from './components/Analytics/Analytics';
+import AddContractor from './components/AddContractor/AddContractor';
+import NewTransaction from './components/NewTransaction/NewTransaction';
+import ProjectList from './components/ProjectList/ProjectList';
+import ContractorList from './components/ContractorList/ContractorList';
+import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
+import { app } from './Firebase';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from './Firebase';
+import './App.css';
 
-interface MenuItem {
-  key: string;
-  icon: JSX.Element;
-  label: string;
-  children?:{
-    label: string;
-    key: string;
-    icon: JSX.Element;
-}[];
-}
-interface DataType {
+const { Header, Sider, Content, Footer } = Layout;
+
+interface Contractor {
   key: string;
   contractorName: string;
   number: string;
@@ -39,252 +36,276 @@ interface DataType {
   amountCredit: number;
   pendingAmount: number;
   promisedAmount: number;
+  verificationStatus?: 'pending' | 'verified';
 }
 
-function App() {
-  const mdUp = useMediaQuery('(min-width:600px)');
-  const [collapsed, setCollapsed] = useState(false);
-  const items: MenuItem[] = [
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const auth = getAuth(app);
+  const user = auth.currentUser;
 
-    { key: '1', icon: <AppstoreOutlined />, label: 'Home' },
-    { key: '2', icon: <BarChartOutlined />, label: 'Analytics' },
-    { key: '3', icon: <TeamOutlined />, label: 'Add Contractor' },
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+function App() {
+  const mdUp = useMediaQuery('(min-width:767px)');
+  const [collapsed, setCollapsed] = useState(false);
+  const [contractors, setContractors] = useState<Contractor[]>([]);
+  const [showModal, setShowModal] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const fetchContractors = async () => {
+      const contractorsRef = collection(db, 'contractors');
+      const snapshot = await getDocs(contractorsRef);
+      const contractorsData = snapshot.docs.map((doc) => ({
+        key: doc.id,
+        ...doc.data(),
+        verificationStatus: 'pending',
+      })) as Contractor[];
+      setContractors(contractorsData);
+    };
+
+    fetchContractors();
+
+    const auth = getAuth(app);
+
+    // Check for stored user data
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      setIsLoggedIn(true);
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setIsLoading(false);
+      if (user) {
+        setIsLoggedIn(true);
+        localStorage.setItem('user', JSON.stringify(user));
+      } else {
+        setIsLoggedIn(false);
+        localStorage.removeItem('user');
+      }
+    });
+
+    // Set up token refresh
+    let refreshTimeout: NodeJS.Timeout;
+    const setupTokenRefresh = async () => {
+      try {
+        const user = auth.currentUser;
+        if (user) {
+          const token = await user.getIdToken();
+          const decodedToken: any = JSON.parse(atob(token.split('.')[1]));
+          const expirationTime = decodedToken.exp * 1000; // Convert to milliseconds
+          const timeToRefresh = expirationTime - Date.now() - (5 * 60 * 1000); // Refresh 5 minutes before expiry
+
+          refreshTimeout = setTimeout(async () => {
+            await user.getIdToken(true); // Force token refresh
+            setupTokenRefresh(); // Set up next refresh
+          }, timeToRefresh);
+        }
+      } catch (error) {
+        console.error('Token refresh error:', error);
+      }
+    };
+
+    setupTokenRefresh();
+
+    return () => {
+      unsubscribe();
+      if (refreshTimeout) {
+        clearTimeout(refreshTimeout);
+      }
+    };
+  }, []);
+
+  const handleContractorUpdate = (updatedContractor: Contractor) => {
+    setContractors((prevContractors) =>
+      prevContractors.map((contractor) =>
+        contractor.key === updatedContractor.key ? updatedContractor : contractor
+      )
+    );
+  };
+
+  const handleTransactionSuccess = () => {
+    setShowModal(null); // Close the modal
+    setRefreshKey(prev => prev + 1); // Trigger refresh
+  };
+
+  const handleModalOpen = (modalName: string) => {
+    setShowModal(modalName);
+  };
+
+  const handleModalClose = () => {
+    setShowModal(null);
+  };
+
+  const handleLogout = async () => {
+    try {
+      const auth = getAuth(app);
+      await signOut(auth);
+      localStorage.removeItem('user');
+      setIsLoggedIn(false);
+      message.success('Successfully logged out');
+    } catch (error) {
+      console.error('Logout error:', error);
+      message.error('Failed to logout. Please try again.');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  const items = [
+    { key: '/', icon: <AppstoreOutlined />, label: <Link to="/">Transaction List</Link> },
+    { key: '/projects', icon: <BarChartOutlined />, label: <Link to="/projects">Project List</Link> },
+    {
+      key: '/contractors',
+      icon: <TeamOutlined />,
+      label: <Link to="/contractors">Contractor List</Link>
+    },
+    {
+      key: '/new-transaction',
+      icon: <EditOutlined />,
+      label: <a onClick={() => handleModalOpen('newtransaction')}>New Transaction</a>,
+    },
+    {
+      key: '/logout',
+      icon: <LogoutOutlined />,
+      label: <a onClick={handleLogout}>Logout</a>,
+    },
   ];
-  const mobileItems: MenuItem[] = [
+
+  const mobileItems = [
     {
       label: 'Menu',
       key: 'SubMenu',
       icon: <SettingOutlined />,
-      children: [
-        { key: '1', icon: <AppstoreOutlined />, label: 'Home' },
-        { key: '2', icon: <BarChartOutlined />, label: 'Analytics' },
-        { key: '3', icon: <TeamOutlined />, label: 'Add Contractor' },
-      ],
+      children: items,
     },
   ];
-  const siderStyle: CSSProperties = {
-    overflow: 'auto',
-    display: mdUp? 'block':'none',
-    height: '100vh',
-  };
-  
-
-  const columns: ColumnType<DataType>[] = [
-    {
-      title: 'Contractor Name',
-      width: 150,
-      dataIndex: 'contractorName',
-      key: 'contractorName',
-      fixed: 'left',
-    },
-    {
-      title: 'Number',
-      width: 120,
-      dataIndex: 'number',
-      key: 'number',
-    },
-    {
-      title: 'Email',
-      width: 200,
-      dataIndex: 'email',
-      key: 'email',
-    },
-    {
-      title: 'Amount Debit',
-      width: 150,
-      dataIndex: 'amountDebit',
-      key: 'amountDebit',
-      sorter: (a: DataType, b: DataType) => a.amountDebit - b.amountDebit,
-    },
-    {
-      title: 'Amount Credit',
-      width: 150,
-      dataIndex: 'amountCredit',
-      key: 'amountCredit',
-      sorter: (a: DataType, b: DataType) => a.amountCredit - b.amountCredit,
-    },
-    {
-      title: 'Pending Amount',
-      width: 150,
-      dataIndex: 'pendingAmount',
-      key: 'pendingAmount',
-    },
-    {
-      title: 'Promised Amount',
-      width: 150,
-      dataIndex: 'promisedAmount',
-      key: 'promisedAmount',
-    },
-    {
-      title: 'Action',
-      key: 'operation',
-      fixed: 'right',
-      width: 100,
-      render: () => <a>action</a>,
-    },
-  ];
-  const dataSource: DataType[] = [
-    {
-      key: '1',
-      contractorName: 'Olivia Smith',
-      number: '123-456-7890',
-      email: 'olivia.smith@example.com',
-      amountDebit: 500,
-      amountCredit: 300,
-      pendingAmount: 200,
-      promisedAmount: 250,
-    },
-    {
-      key: '2',
-      contractorName: 'Ethan Johnson',
-      number: '234-567-8901',
-      email: 'ethan.johnson@example.com',
-      amountDebit: 800,
-      amountCredit: 600,
-      pendingAmount: 200,
-      promisedAmount: 300,
-    },
-    {
-      key: '3',
-      contractorName: 'Emma Williams',
-      number: '345-678-9012',
-      email: 'emma.williams@example.com',
-      amountDebit: 750,
-      amountCredit: 500,
-      pendingAmount: 250,
-      promisedAmount: 300,
-    },
-    {
-      key: '4',
-      contractorName: 'Liam Brown',
-      number: '456-789-0123',
-      email: 'liam.brown@example.com',
-      amountDebit: 900,
-      amountCredit: 700,
-      pendingAmount: 200,
-      promisedAmount: 350,
-    },
-    {
-      key: '5',
-      contractorName: 'Sophia Garcia',
-      number: '567-890-1234',
-      email: 'sophia.garcia@example.com',
-      amountDebit: 650,
-      amountCredit: 500,
-      pendingAmount: 150,
-      promisedAmount: 200,
-    },
-    {
-      key: '6',
-      contractorName: 'William Martinez',
-      number: '678-901-2345',
-      email: 'william.martinez@example.com',
-      amountDebit: 300,
-      amountCredit: 200,
-      pendingAmount: 100,
-      promisedAmount: 150,
-    },
-    {
-      key: '7',
-      contractorName: 'Isabella Hernandez',
-      number: '789-012-3456',
-      email: 'isabella.hernandez@example.com',
-      amountDebit: 1200,
-      amountCredit: 950,
-      pendingAmount: 250,
-      promisedAmount: 300,
-    },
-    {
-      key: '8',
-      contractorName: 'James Moore',
-      number: '890-123-4567',
-      email: 'james.moore@example.com',
-      amountDebit: 560,
-      amountCredit: 450,
-      pendingAmount: 110,
-      promisedAmount: 160,
-    },
-    {
-      key: '9',
-      contractorName: 'Mia Lopez',
-      number: '901-234-5678',
-      email: 'mia.lopez@example.com',
-      amountDebit: 700,
-      amountCredit: 600,
-      pendingAmount: 100,
-      promisedAmount: 180,
-    },
-    {
-      key: '10',
-      contractorName: 'Alexander Wilson',
-      number: '012-345-6789',
-      email: 'alexander.wilson@example.com',
-      amountDebit: 450,
-      amountCredit: 350,
-      pendingAmount: 100,
-      promisedAmount: 130,
-    },
-    // Add more entries if needed
-  ];
-  
 
   return (
+    <Router>
+      <Routes>
+        <Route path="/login" element={!isLoggedIn ? <Login /> : <Navigate to="/" replace />} />
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                {mdUp && (
+                  <Sider
+                    trigger={null}
+                    collapsible
+                    collapsed={collapsed}
+                    style={{
+                      overflow: 'auto',
+                      height: '100vh',
+                    }}
+                  >
+                    <div className="logo" />
+                    <Menu
+                      theme="dark"
+                      mode="inline"
+                      defaultSelectedKeys={['/']}
+                      items={items}
+                    />
+                  </Sider>
+                )}
 
-    <Layout>
-      {mdUp?
-    <Sider trigger={null} collapsible collapsed={collapsed} style={siderStyle}>
-      <div className="demo-logo-vertical" />
-      <Menu
-        theme="dark"
-        mode="inline"
-        defaultSelectedKeys={['1']}
-        items={items}
-      />
-    </Sider>:''}
-    <Layout>
-      <Header style={{ padding: 0, background:'white' }}>
-        {mdUp?
-        <Button
-          type="text"
-          icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-          onClick={() => setCollapsed(!collapsed)}
-          style={{
-            fontSize: '16px',
-            width: 64,
-            height: 64,
-          }}
-        />:
-        <Menu selectedKeys={['1']} mode="horizontal" items={mobileItems} />}
-      </Header>
-      <Content
-        style={{
-          margin: '24px 16px',
-          padding: 24,
-          minHeight: 280,
-        }}
-      >
-    <div style={{ height: '80vh', overflowY: 'auto' }}>
-      <Table
-        pagination={false}
-        columns={columns}
-        dataSource={dataSource}
-        scroll={{
-          x: 'max-content', // Horizontal scrolling for wide content
-          y: '100vh', // Makes the table height scrollable within the container
-        }}
-      />
-    </div>
-      </Content>
-      <Footer
-          style={{
-            textAlign: 'center',
-          }}
-        >
-          Om Prakash ©{new Date().getFullYear()} 
-        </Footer>
-    </Layout>
-  </Layout>
-  )
+                <Layout>
+                  <Header style={{ padding: 0, background: 'white' }}>
+                    {mdUp ? (
+                      <Button
+                        type="text"
+                        icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                        onClick={() => setCollapsed(!collapsed)}
+                        style={{
+                          fontSize: '16px',
+                          width: 64,
+                          height: 64,
+                        }}
+                      />
+                    ) : (
+                      <Menu
+                        selectedKeys={['/']}
+                        mode="horizontal"
+                        items={mobileItems}
+                      />
+                    )}
+                  </Header>
+
+                  <Content
+                    style={{
+                      marginLeft: '16px',
+                      marginRight: '16px',
+                      marginTop: '10px',
+                      padding: 24,
+                      minHeight: 280,
+                    }}
+                  >
+                    <Routes>
+                      <Route path="/" element={<Home refreshKey={refreshKey} />} />
+                      <Route path="/projects" element={<ProjectList />} />
+                      <Route path="/contractors" element={<ContractorList />} />
+                    </Routes>
+                  </Content>
+
+                  <Footer style={{ textAlign: 'center', padding: '10px' }}>
+                    Om Prakash ©{new Date().getFullYear()}
+                  </Footer>
+                </Layout>
+
+                <Modal
+                  title="Add Contractor"
+                  open={showModal === 'addContractor'}
+                  onCancel={handleModalClose}
+                  footer={null}
+                >
+                  <AddContractor />
+                </Modal>
+
+                <Modal
+                  title="New Transaction"
+                  open={showModal === 'newtransaction'}
+                  onCancel={handleModalClose}
+                  footer={null}
+                  className="transaction-modal"
+                  style={{ top: '7vh' }}
+                >
+                  <NewTransaction
+                    contractors={contractors}
+                    onContractorUpdated={handleContractorUpdate}
+                    onTransactionSuccess={handleTransactionSuccess}
+                  />
+                </Modal>
+
+                <Modal
+                  title="Analytics"
+                  open={showModal === 'analytics'}
+                  onCancel={handleModalClose}
+                  footer={null}
+                >
+                  <Analytics />
+                </Modal>
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </Router>
+  );
 }
 
-export default App
+export default App;
+
