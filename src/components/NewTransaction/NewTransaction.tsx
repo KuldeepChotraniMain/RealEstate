@@ -1,98 +1,116 @@
 import { useState, useEffect } from 'react';
-import { Form, Select, Input, Button, Radio, Upload, message, Spin } from 'antd';
+import { Form, Select, Input, Button, Upload, message, Spin } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
-//import { useNavigate } from 'react-router-dom';
-import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../Firebase';
+import { projectsAPI, contractorsAPI, transactionsAPI } from '../../api';
+import { metricsAPI } from '../../api';
+import type { RcFile } from 'antd/es/upload/interface';
 
 interface Project {
-    key: string;
-    projectName: string;
-    contractorAssigned: { id: string, name: string };
+    projectId: string;
+    name: string;
+    contractors: string[];
+    budget: number;
+    dueDate: string;
 }
 
 interface Contractor {
-    key: string;
-    contractorName: string;
-    number: string;
+    contractorId: string;
+    name: string;
     email: string;
-    amountDebit: number;
-    amountCredit: number;
-    pendingAmount: number;
-    promisedAmount: number;
-    verificationStatus?: 'pending' | 'verified';
+    phone: number;
 }
 
 interface NewTransactionProps {
-    contractors: Contractor[];
-    onContractorUpdated: (updatedContractor: Contractor) => void;
     onTransactionSuccess?: () => void;
 }
 
-const NewTransaction: React.FC<NewTransactionProps> = ({ onContractorUpdated, onTransactionSuccess }) => {
+const NewTransaction: React.FC<NewTransactionProps> = ({ onTransactionSuccess }) => {
     const [form] = Form.useForm();
-    const [selectedContractor, setSelectedContractor] = useState<Contractor | null>(null);
     const [projects, setProjects] = useState<Project[]>([]);
+    const [contractors, setContractors] = useState<Contractor[]>([]);
+    const [selectedProjectContractors, setSelectedProjectContractors] = useState<Contractor[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
-    //const navigate = useNavigate();
+    const [fileString, setFileString] = useState<string>('');
 
+    // Fetch projects and contractors on component mount
     useEffect(() => {
-        const fetchProjects = async () => {
-            const projectsRef = collection(db, 'Projects');
-            const snapshot = await getDocs(projectsRef);
-            const projectsData = snapshot.docs.map((doc) => ({
-                key: doc.id,
-                projectName: doc.data().projectName,
-                contractorAssigned: doc.data().contractorAssigned,
-            }));
-            setProjects(projectsData);
+        const fetchData = async () => {
+            try {
+                setLoading(true);
+                const [projectsRes, contractorsRes] = await Promise.all([
+                    projectsAPI.getAll(),
+                    contractorsAPI.getAll()
+                ]);
+                setProjects(projectsRes.data);
+                setContractors(contractorsRes.data);
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                message.error('Failed to load projects and contractors');
+            } finally {
+                setLoading(false);
+            }
         };
 
-        fetchProjects();
+        fetchData();
     }, []);
 
-    const onProjectSelect = async (value: string) => {
-        const selectedProject = projects.find(project => project.key === value);
-        if (selectedProject) {
-            const contractorDoc = await getDoc(doc(db, selectedProject.contractorAssigned.id));
-            if (contractorDoc.exists()) {
-                const contractorData = contractorDoc.data() as Contractor;
+    // Convert file to base64 string
+    const convertFileToString = (file: RcFile): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = error => reject(error);
+        });
+    };
 
-                setSelectedContractor({ ...contractorData, key: contractorDoc.id });
-                form.setFieldsValue({
-                    contractorName: selectedProject.contractorAssigned.name,
-                    number: contractorData?.number || '',
-                    email: contractorData?.email || '',
-                    amountDebit: contractorData?.amountDebit || 0,
-                    amountCredit: contractorData?.amountCredit || 0,
-                    pendingAmount: contractorData?.pendingAmount || 0,
-                    promisedAmount: contractorData?.promisedAmount || 0,
-                });
-            } else {
-                message.error('Selected contractor not found');
-            }
+    // Update available contractors when project is selected
+    const onProjectSelect = async (projectId: string) => {
+        try {
+            setLoading(true);
+            const response = await metricsAPI.getProjectContractors(projectId);
+            setSelectedProjectContractors(response.data);
+            form.resetFields(['contractor']);
+        } catch (error) {
+            console.error('Error fetching project contractors:', error);
+            message.error('Failed to load contractors for this project');
+        } finally {
+            setLoading(false);
         }
     };
 
     const onFinish = async (values: any) => {
         setLoading(true);
-        if (selectedContractor) {
-            const updatedContractor = {
-                ...selectedContractor,
-                ...values,
+        try {
+            // Basic validation
+            if (!values.transactionAmount || values.transactionAmount <= 0) {
+                throw new Error('Invalid transaction amount');
+            }
+
+            const transactionData = {
+                project: values.project,
+                contractor: values.contractor,
+                transactionAmount: Number(values.transactionAmount),
+                transactionDate: new Date().toISOString().split('T')[0],
+                transactionProof: fileString || 'No proof attached',
+                signature: ''
             };
 
-            try {
-                await updateDoc(doc(db, 'contractors', selectedContractor.key), updatedContractor);
-                message.success('Transaction successful');
-                onContractorUpdated(updatedContractor);
-                onTransactionSuccess?.(); // Call the success handler
-            } catch (error) {
-                console.error('Error updating contractor:', error);
-                message.error('Failed to update contractor. Please try again.');
-            } finally {
-                setLoading(false);
-            }
+            console.log('Sending transaction data:', transactionData);
+
+            const response = await transactionsAPI.create(transactionData);
+
+            console.log('Transaction response:', response);
+
+            message.success('Transaction created successfully');
+            form.resetFields();
+            setFileString('');
+            onTransactionSuccess?.();
+        } catch (error: any) {
+            console.error('Error creating transaction:', error);
+            message.error(error.response?.data?.message || 'Failed to create transaction. Please try again.');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -106,108 +124,91 @@ const NewTransaction: React.FC<NewTransactionProps> = ({ onContractorUpdated, on
                     scrollToFirstError
                 >
                     <Form.Item
-                        name="projectKey"
+                        name="project"
                         label="Select Project"
                         rules={[{ required: true, message: 'Please select a project' }]}
                     >
                         <Select
                             placeholder="Select a project"
-                            onChange={onProjectSelect}
+                            onChange={(value) => onProjectSelect(value)}
                         >
                             {projects.map(project => (
-                                <Select.Option key={project.key} value={project.key}>
-                                    {project.projectName}
+                                <Select.Option key={project.projectId} value={project.projectId}>
+                                    {project.name}
                                 </Select.Option>
                             ))}
                         </Select>
                     </Form.Item>
 
                     <Form.Item
-                        name="contractorName"
-                        label="Contractor Name"
+                        name="contractor"
+                        label="Select Contractor"
+                        rules={[{ required: true, message: 'Please select a contractor' }]}
                     >
-                        <Input disabled />
-                    </Form.Item>
-
-                    <Form.Item
-                        name="amountDebit"
-                        label="Amount Debit"
-                        rules={[{ required: true, message: 'Please input debit amount' }]}
-                    >
-                        <Input type="number" />
-                    </Form.Item>
-
-                    <Form.Item
-                        name="debitType"
-                        label="Debit Payment Type"
-                        rules={[{ required: true }]}
-                    >
-                        <Radio.Group>
-                            <Radio value="online">Online</Radio>
-                            <Radio value="cash">Cash</Radio>
-                        </Radio.Group>
-                    </Form.Item>
-
-                    {form.getFieldValue('debitType') === 'online' && (
-                        <Form.Item
-                            name="debitReceipt"
-                            label="Debit Payment Receipt"
+                        <Select
+                            placeholder="Select a contractor"
                         >
-                            <Upload>
-                                <Button icon={<UploadOutlined />}>Upload Receipt</Button>
-                            </Upload>
-                        </Form.Item>
-                    )}
-
-                    <Form.Item
-                        name="amountCredit"
-                        label="Amount Credit"
-                        rules={[{ required: true, message: 'Please input credit amount' }]}
-                    >
-                        <Input type="number" />
+                            {selectedProjectContractors.map(contractor => (
+                                <Select.Option key={contractor.contractorId} value={contractor.contractorId}>
+                                    {contractor.name}
+                                </Select.Option>
+                            ))}
+                        </Select>
                     </Form.Item>
 
                     <Form.Item
-                        name="creditType"
-                        label="Credit Payment Type"
-                        rules={[{ required: true }]}
+                        name="transactionAmount"
+                        label="Transaction Amount"
+                        rules={[{ required: true, message: 'Please enter transaction amount' }]}
                     >
-                        <Radio.Group>
-                            <Radio value="online">Online</Radio>
-                            <Radio value="cash">Cash</Radio>
-                        </Radio.Group>
+                        <Input
+                            type="number"
+                            prefix="₹"
+                            placeholder="Enter amount"
+                        />
                     </Form.Item>
 
-                    {form.getFieldValue('creditType') === 'online' && (
-                        <Form.Item
-                            name="creditReceipt"
-                            label="Credit Payment Receipt"
+                    <Form.Item
+                        name="transactionProof"
+                        label="Transaction Proof"
+                        extra="Upload payment receipt or proof of transaction (Images or PDF only)"
+                        rules={[{ required: false }]}
+                    >
+                        <Upload
+                            beforeUpload={async (file) => {
+                                const isValidType = file.type.startsWith('image/') || file.type === 'application/pdf';
+                                const isValidSize = file.size / 1024 / 1024 < 5;
+
+                                if (!isValidType) {
+                                    message.error('You can only upload image or PDF files!');
+                                    return Upload.LIST_IGNORE;
+                                }
+                                if (!isValidSize) {
+                                    message.error('File must be smaller than 5MB!');
+                                    return Upload.LIST_IGNORE;
+                                }
+
+                                try {
+                                    const fileStr = await convertFileToString(file);
+                                    setFileString(fileStr);
+                                } catch (error) {
+                                    console.error('Error converting file:', error);
+                                    message.error('Failed to process file');
+                                    return Upload.LIST_IGNORE;
+                                }
+
+                                return false; // Prevent default upload behavior
+                            }}
+                            listType="picture"
+                            maxCount={1}
                         >
-                            <Upload>
-                                <Button icon={<UploadOutlined />}>Upload Receipt</Button>
-                            </Upload>
-                        </Form.Item>
-                    )}
-
-                    <Form.Item
-                        name="pendingAmount"
-                        label="Pending Amount"
-                        rules={[{ required: true, message: 'Please input pending amount' }]}
-                    >
-                        <Input type="number" />
-                    </Form.Item>
-
-                    <Form.Item
-                        name="promisedAmount"
-                        label="Promised Amount"
-                        rules={[{ required: true, message: 'Please input promised amount' }]}
-                    >
-                        <Input type="number" />
+                            <Button icon={<UploadOutlined />}>Upload Proof</Button>
+                        </Upload>
                     </Form.Item>
 
                     <Form.Item>
-                        <Button type="primary" htmlType="submit">
-                            Submit
+                        <Button type="primary" htmlType="submit" loading={loading}>
+                            Create Transaction
                         </Button>
                     </Form.Item>
                 </Form>

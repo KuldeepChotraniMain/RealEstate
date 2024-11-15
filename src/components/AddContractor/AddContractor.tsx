@@ -1,6 +1,7 @@
+// AddContractor.tsx
+import React from 'react';
 import { Form, Input, Button, message } from 'antd';
-import { collection, addDoc } from 'firebase/firestore';
-import { db } from '../../Firebase';
+import { contractorsAPI } from '../../api';
 import './AddContractor.css';
 
 interface AddContractorProps {
@@ -12,19 +13,13 @@ const AddContractor: React.FC<AddContractorProps> = ({ onSuccess }) => {
 
   const onFinish = async (values: any) => {
     const newContractor = {
-      key: `${Date.now()}`,
-      contractorName: values.contractorName,
-      number: values.number,
-      email: values.email,
-      amountDebit: 'N/A',
-      amountCredit: 'N/A',
-      pendingAmount: 'N/A',
-      promisedAmount: 'N/A',
-      verification: 'pending'
+      name: values.name,
+      phone: values.phone,
+      email: values.email
     };
 
     try {
-      await addDoc(collection(db, 'contractors'), newContractor);
+      await contractorsAPI.create(newContractor);
       message.success('Contractor added successfully!');
       form.resetFields();
       if (onSuccess) {
@@ -46,17 +41,17 @@ const AddContractor: React.FC<AddContractorProps> = ({ onSuccess }) => {
       >
         <Form.Item
           label="Contractor Name"
-          name="contractorName"
+          name="name"
           rules={[{ required: true, message: 'Please input contractor name!' }]}
         >
           <Input />
         </Form.Item>
         <Form.Item
           label="Phone Number"
-          name="number"
+          name="phone"
           rules={[{ required: true, message: 'Please input phone number!' }]}
         >
-          <Input />
+          <Input type="number" />
         </Form.Item>
         <Form.Item
           label="Email"

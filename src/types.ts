@@ -10,13 +10,10 @@ export interface MenuItem {
     }[];
 }
 
-export interface DataType {
-    key: string;
-    contractorName: string;
-    number: string;
+export interface Contractor {
+    id: string;
+    name: string;
     email: string;
-    amountDebit: number;
-    amountCredit: number;
-    pendingAmount: number;
-    promisedAmount: number;
+    phone: string;
 }
+

@@ -1,10 +1,10 @@
+//AddProject
 import { useState } from 'react';
 import { Modal, Form, Input, DatePicker, Button } from 'antd';
 import { addDoc, collection } from 'firebase/firestore';
 import { db } from '../../Firebase';
-import { DataType } from '../../types';
 
-interface Project extends DataType {
+interface Project {
     projectName: string;
     address?: string;
     contractorAssigned: string;

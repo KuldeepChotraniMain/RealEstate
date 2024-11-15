@@ -8,36 +8,24 @@ import {
   AppstoreOutlined,
   BarChartOutlined,
   TeamOutlined,
-  EditOutlined,
   SettingOutlined,
   LogoutOutlined,
+  ShoppingCartOutlined,
 } from '@ant-design/icons';
 import Login from './components/Login/Login';
 import Home from './components/Home/Home';
-import Analytics from './components/Analytics/Analytics';
 import AddContractor from './components/AddContractor/AddContractor';
-import NewTransaction from './components/NewTransaction/NewTransaction';
 import ProjectList from './components/ProjectList/ProjectList';
+import ProjectHistory from './components/ProjectHistory/ProjectHistory';
+import BuySell from './components/BuySell/BuySell';
 import ContractorList from './components/ContractorList/ContractorList';
+import ContractorHistory from './components/ContractorHistory/ContractorHistory';
 import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
 import { app } from './Firebase';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from './Firebase';
 import './App.css';
 
 const { Header, Sider, Content, Footer } = Layout;
 
-interface Contractor {
-  key: string;
-  contractorName: string;
-  number: string;
-  email: string;
-  amountDebit: number;
-  amountCredit: number;
-  pendingAmount: number;
-  promisedAmount: number;
-  verificationStatus?: 'pending' | 'verified';
-}
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const auth = getAuth(app);
@@ -53,26 +41,11 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 function App() {
   const mdUp = useMediaQuery('(min-width:767px)');
   const [collapsed, setCollapsed] = useState(false);
-  const [contractors, setContractors] = useState<Contractor[]>([]);
   const [showModal, setShowModal] = useState<string | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    const fetchContractors = async () => {
-      const contractorsRef = collection(db, 'contractors');
-      const snapshot = await getDocs(contractorsRef);
-      const contractorsData = snapshot.docs.map((doc) => ({
-        key: doc.id,
-        ...doc.data(),
-        verificationStatus: 'pending',
-      })) as Contractor[];
-      setContractors(contractorsData);
-    };
-
-    fetchContractors();
-
     const auth = getAuth(app);
 
     // Check for stored user data
@@ -81,64 +54,40 @@ function App() {
       setIsLoggedIn(true);
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    // Setup auth state listener
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setIsLoading(false);
+
       if (user) {
         setIsLoggedIn(true);
-        localStorage.setItem('user', JSON.stringify(user));
+
+        try {
+          // Get fresh token on auth state change
+          const token = await user.getIdToken();
+          localStorage.setItem('token', token);
+          localStorage.setItem('lastTokenRefresh', Date.now().toString());
+
+          // Update user info
+          localStorage.setItem('user', JSON.stringify({
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+          }));
+        } catch (error) {
+          console.error('Token refresh error:', error);
+        }
       } else {
         setIsLoggedIn(false);
+        localStorage.removeItem('token');
+        localStorage.removeItem('lastTokenRefresh');
         localStorage.removeItem('user');
       }
     });
 
-    // Set up token refresh
-    let refreshTimeout: NodeJS.Timeout;
-    const setupTokenRefresh = async () => {
-      try {
-        const user = auth.currentUser;
-        if (user) {
-          const token = await user.getIdToken();
-          const decodedToken: any = JSON.parse(atob(token.split('.')[1]));
-          const expirationTime = decodedToken.exp * 1000; // Convert to milliseconds
-          const timeToRefresh = expirationTime - Date.now() - (5 * 60 * 1000); // Refresh 5 minutes before expiry
-
-          refreshTimeout = setTimeout(async () => {
-            await user.getIdToken(true); // Force token refresh
-            setupTokenRefresh(); // Set up next refresh
-          }, timeToRefresh);
-        }
-      } catch (error) {
-        console.error('Token refresh error:', error);
-      }
-    };
-
-    setupTokenRefresh();
-
     return () => {
       unsubscribe();
-      if (refreshTimeout) {
-        clearTimeout(refreshTimeout);
-      }
     };
   }, []);
-
-  const handleContractorUpdate = (updatedContractor: Contractor) => {
-    setContractors((prevContractors) =>
-      prevContractors.map((contractor) =>
-        contractor.key === updatedContractor.key ? updatedContractor : contractor
-      )
-    );
-  };
-
-  const handleTransactionSuccess = () => {
-    setShowModal(null); // Close the modal
-    setRefreshKey(prev => prev + 1); // Trigger refresh
-  };
-
-  const handleModalOpen = (modalName: string) => {
-    setShowModal(modalName);
-  };
 
   const handleModalClose = () => {
     setShowModal(null);
@@ -148,7 +97,7 @@ function App() {
     try {
       const auth = getAuth(app);
       await signOut(auth);
-      localStorage.removeItem('user');
+      localStorage.clear();
       setIsLoggedIn(false);
       message.success('Successfully logged out');
     } catch (error) {
@@ -174,9 +123,9 @@ function App() {
       label: <Link to="/contractors">Contractor List</Link>
     },
     {
-      key: '/new-transaction',
-      icon: <EditOutlined />,
-      label: <a onClick={() => handleModalOpen('newtransaction')}>New Transaction</a>,
+      key: '/buysell',
+      icon: <ShoppingCartOutlined />,
+      label: <Link to="/buysell">Buy/Sell</Link>
     },
     {
       key: '/logout',
@@ -247,18 +196,21 @@ function App() {
 
                   <Content
                     style={{
-                      marginLeft: '16px',
-                      marginRight: '16px',
-                      marginTop: '10px',
-                      padding: 24,
+                      marginLeft: '10px',
+                      marginRight: '10px',
+                      marginTop: '12px',
+                      padding: 12,
                       minHeight: 280,
                     }}
                   >
                     <Routes>
-                      <Route path="/" element={<Home refreshKey={refreshKey} />} />
+                      <Route path="/" element={<Home/>} />
                       <Route path="/projects" element={<ProjectList />} />
+                      <Route path="/project-history/:projectId" element={<ProjectHistory />} />
+                      <Route path="/buysell" element={<BuySell />} />
                       <Route path="/contractors" element={<ContractorList />} />
-                    </Routes>
+                      <Route path="/contractor-history/:contractorId" element={<ContractorHistory />} />
+                    </Routes> 
                   </Content>
 
                   <Footer style={{ textAlign: 'center', padding: '10px' }}>
@@ -275,29 +227,7 @@ function App() {
                   <AddContractor />
                 </Modal>
 
-                <Modal
-                  title="New Transaction"
-                  open={showModal === 'newtransaction'}
-                  onCancel={handleModalClose}
-                  footer={null}
-                  className="transaction-modal"
-                  style={{ top: '7vh' }}
-                >
-                  <NewTransaction
-                    contractors={contractors}
-                    onContractorUpdated={handleContractorUpdate}
-                    onTransactionSuccess={handleTransactionSuccess}
-                  />
-                </Modal>
-
-                <Modal
-                  title="Analytics"
-                  open={showModal === 'analytics'}
-                  onCancel={handleModalClose}
-                  footer={null}
-                >
-                  <Analytics />
-                </Modal>
+            
               </Layout>
             </ProtectedRoute>
           }

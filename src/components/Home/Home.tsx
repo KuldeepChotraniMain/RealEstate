@@ -1,21 +1,30 @@
-import { useState, useEffect } from 'react';
-import { Table, Modal, Checkbox, Button, message, Card, Row, Col } from 'antd';
+import React, { useState, useEffect } from 'react'
+import { Table, Modal, Checkbox, Button, message, Card, Row, Col, Image } from 'antd';
 import { ColumnType } from 'antd/es/table';
+import { TransactionOutlined } from '@ant-design/icons';
 import SignatureCanvas from 'react-signature-canvas';
-import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../Firebase';
+import { transactionsAPI } from '../../api';
 import './Home.css';
+import NewTransaction from '../NewTransaction/NewTransaction';
 
-interface Contractor {
-  key: string;
-  contractorName: string;
-  number: string;
-  email: string;
-  amountDebit: number;
-  amountCredit: number;
-  pendingAmount: number;
-  promisedAmount: number;
-  verification?: 'pending' | 'verified';
+
+interface Transaction {
+  transactionId: string;
+  project: {
+    projectId: string;
+    projectName: string;
+  };
+  contractor: {
+    contractorId: string;
+    name: string;
+    email: string;
+    phone: number;
+  };
+  transactionAmount: number;
+  transactionDate: string;
+  transactionProof: string;
+  signature: string;
+  status: 'verified' | 'unverified';
 }
 
 interface HomeProps {
@@ -23,165 +32,174 @@ interface HomeProps {
 }
 
 const Home: React.FC<HomeProps> = ({ refreshKey = 0 }) => {
-  const [contractors, setContractors] = useState<Contractor[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [selectedContractor, setSelectedContractor] = useState<Contractor | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [modalVisible, setModalVisible] = useState(false)
+  const [showNewTransactionModal, setShowNewTransactionModal] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [isConfirmed, setIsConfirmed] = useState(false);
   const [signatureRef, setSignatureRef] = useState<SignatureCanvas | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const transactionsResponse = await transactionsAPI.getAll();
+      setTransactions(transactionsResponse.data);
+    } catch (error) {
+      message.error('Failed to fetch data');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchContractors = async () => {
-      const contractorsRef = collection(db, 'contractors');
-      const snapshot = await getDocs(contractorsRef);
-      const contractorsData = snapshot.docs.map((doc) => ({
-        key: doc.id,
-        ...doc.data(),
-      })) as Contractor[];
-      setContractors(contractorsData);
-    };
-    fetchContractors();
+    fetchData();
   }, [refreshKey]);
 
-  const handleActionClick = (record: Contractor) => {
-    if (record.verification === 'verified') return;
+  const handleActionClick = (record: Transaction) => {
+    if (record.status === 'verified') return;
 
-    setSelectedContractor(record);
+    setSelectedTransaction(record);
     setModalVisible(true);
     setIsConfirmed(false);
     signatureRef?.clear();
   };
 
   const handleModalSubmit = async () => {
-    if (!isConfirmed || !signatureRef?.isEmpty()) {
-      if (selectedContractor) {
-        try {
-          // Update the document in the database
-          await updateDoc(doc(db, 'contractors', selectedContractor.key), {
-            verification: 'verified',
-          });
+    if (!isConfirmed || !selectedTransaction) return;
 
-          // Refetch the data to update the table
-          const contractorsRef = collection(db, 'contractors');
-          const snapshot = await getDocs(contractorsRef);
-          const contractorsData = snapshot.docs.map((doc) => ({
-            key: doc.id,
-            ...doc.data(),
-          })) as Contractor[];
-          setContractors(contractorsData);
+    try {
+      const signatureData = signatureRef?.toDataURL();
 
-          setModalVisible(false);
-          setIsConfirmed(false);
-          signatureRef?.clear();
-        } catch (error) {
-          console.error('Error updating contractor verification:', error);
-          message.error('Failed to update contractor verification. Please try again.');
-        }
-      }
+      await transactionsAPI.update(selectedTransaction.transactionId, {
+        project: selectedTransaction.project.projectId,
+        contractor: selectedTransaction.contractor.contractorId,
+        transactionAmount: selectedTransaction.transactionAmount,
+        transactionDate: selectedTransaction.transactionDate,
+        transactionProof: selectedTransaction.transactionProof,
+        signature: signatureData
+      });
+
+      message.success('Transaction verified successfully');
+      fetchData();
+      setModalVisible(false);
+      setIsConfirmed(false);
+      signatureRef?.clear();
+    } catch (error) {
+      console.error('Error updating transaction verification:', error);
+      message.error('Failed to verify transaction. Please try again.');
     }
   };
 
-
-  const columns: ColumnType<Contractor>[] = [
+  const columns: ColumnType<Transaction>[] = [
+    {
+      title: 'Project Name',
+      width: 150,
+      dataIndex: ['project', 'projectName'],
+      key: 'projectName',
+      align: 'left',
+    },
     {
       title: 'Contractor Name',
       width: 150,
-      dataIndex: 'contractorName',
+      dataIndex: ['contractor', 'name'],
       key: 'contractorName',
       fixed: 'left',
     },
     {
-      title: 'Number',
+      title: 'Phone',
       width: 120,
-      dataIndex: 'number',
-      key: 'number',
+      dataIndex: ['contractor', 'phone'],
+      key: 'contractorPhone',
       align: 'center',
     },
     {
       title: 'Email',
       width: 200,
-      dataIndex: 'email',
-      key: 'email',
+      dataIndex: ['contractor', 'email'],
+      key: 'contractorEmail',
       align: 'center',
     },
     {
-      title: 'Amount Debit',
+      title: 'Transaction Amount',
       width: 150,
-      dataIndex: 'amountDebit',
-      key: 'amountDebit',
-      sorter: (a, b) => a.amountDebit - b.amountDebit,
+      dataIndex: 'transactionAmount',
+      key: 'transactionAmount',
       align: 'center',
+      render: (value: number) => `₹${value.toLocaleString()}`
     },
     {
-      title: 'Amount Credit',
-      width: 150,
-      dataIndex: 'amountCredit',
-      key: 'amountCredit',
-      sorter: (a, b) => a.amountCredit - b.amountCredit,
-      align: 'center',
-    },
-    {
-      title: 'Pending Amount',
-      width: 150,
-      dataIndex: 'pendingAmount',
-      key: 'pendingAmount',
-      align: 'center',
-    },
-    {
-      title: 'Promised Amount',
-      width: 150,
-      dataIndex: 'promisedAmount',
-      key: 'promisedAmount',
-      align: 'center',
-    },
-    {
-      title: 'Verifcation',
-      key: 'operation',
-      width: 100,
-      render: (_, record: Contractor) => (
-        <a
-          onClick={() => handleActionClick(record)}
-          style={{
-            color: record.verification === 'verified' ? '#52c41a' : '#1890ff',
-            cursor: record.verification === 'verified' ? 'default' : 'pointer',
-          }}
-        >
-          {record.verification}
-        </a>
-      ),
+      title: 'Signature Status',
+      key: 'signature',
+      width: 120,
+      render: (_, record: Transaction) => {
+        return (
+          <a
+            onClick={() => handleActionClick(record)}
+            style={{
+              color: record.status === 'unverified' ? '#1890ff' : '#52c41a',
+              cursor: record.status === 'unverified' ? 'pointer' : 'default',
+            }}
+          >
+            {record.status}
+          </a>
+        );
+      },
       align: 'center',
     },
   ];
 
-
   const renderMobileCards = () => {
     return (
       <Row gutter={[16, 16]} className="mobile-cards">
-        {contractors.map((contractor) => (
-          <Col xs={24} key={contractor.key}>
+        {transactions.map((transaction) => (
+          <Col xs={24} key={transaction.transactionId}>
             <Card
-              className={`contractor-card ${selectedContractor?.key === contractor.key ? 'selected' : ''}`}
-              onClick={() => contractor.verification !== 'verified' && handleActionClick(contractor)}
+              className={`transaction-card ${selectedTransaction?.transactionId === transaction.transactionId ? 'selected' : ''}`}
             >
-              <h3 className="contractor-name">{contractor.contractorName}</h3>
-              <div className="divider" />
-              <div className="amount-row">
-                <div className="amount-item">
-                  <span className="label">Credit:</span>
-                  <span className="value">₹{contractor.amountCredit}</span>
-                </div>
-                <div className="amount-item">
-                  <span className="label">Debit:</span>
-                  <span className="value">₹{contractor.amountDebit}</span>
-                </div>
-              </div>
-              <div className="pending-amount">
-                <span className="label">Pending:</span>
-                <span className="value">₹{contractor.pendingAmount}</span>
+              <div className='header'>
+                <div className="cont-name">{transaction.contractor.name}</div>
+                <Button
+                  className='edit-button'
+                  type="primary"
+                  icon={<TransactionOutlined />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowNewTransactionModal(true);
+                  }}
+                />
               </div>
               <div className="divider" />
-              <div className={`verification-status ${contractor.verification}`}>
-                <span className="label">Verification:</span>
-                {contractor.verification}
+              <div className="amount-item">
+                <span className="label">Project Name:</span>
+                <span className="value">{transaction.project.projectName}</span>
+              </div>
+              <div className="contact-info">
+                <div className="info-item">
+                  <span className="label">Phone:</span>
+                  <span className="value">{transaction.contractor.phone}</span>
+                </div>
+                <div className="info-item">
+                  <span className="label">Email:</span>
+                  <span className="value">{transaction.contractor.email}</span>
+                </div>
+              </div>
+              <div className="amount-item">
+                <span className="label">Transaction Amount:</span>
+                <span className="value">₹{transaction.transactionAmount.toLocaleString()}</span>
+              </div>
+
+              <div className="divider" />
+              <div
+                className={`verification-status ${transaction.status === 'unverified' ? 'pending' : 'verified'}`}
+                onClick={() => transaction.status === 'unverified' ? handleActionClick(transaction) : undefined}
+                style={{
+                  cursor: transaction.status === 'unverified' ? 'pointer' : 'default'
+                }}
+              >
+                <span className="label">Signature Status:</span>
+                {transaction.status}
               </div>
             </Card>
           </Col>
@@ -192,17 +210,30 @@ const Home: React.FC<HomeProps> = ({ refreshKey = 0 }) => {
 
   return (
     <div className="home-container">
+      <div className="new-transaction-button-container">
+        <Button
+          type="primary"
+          icon={<TransactionOutlined />}
+          onClick={() => setShowNewTransactionModal(true)}
+        >
+          New Transaction
+        </Button>
+      </div>
+
       <div className="table-container">
         {window.innerWidth <= 768 ? renderMobileCards() : (
-          <Table
-            pagination={false}
-            columns={columns}
-            dataSource={contractors}
-            scroll={{
-              x: 'max-content',
-              y: 'calc(100vh - 230px)',
-            }}
-          />
+          <>
+            <Table
+              loading={loading}
+              pagination={false}
+              columns={columns}
+              dataSource={transactions}
+              scroll={{
+                x: 'max-content',
+                y: 'calc(100vh - 230px)',
+              }}
+            />
+          </>
         )}
       </div>
 
@@ -229,8 +260,9 @@ const Home: React.FC<HomeProps> = ({ refreshKey = 0 }) => {
             checked={isConfirmed}
             onChange={(e) => setIsConfirmed(e.target.checked)}
           >
-            I hereby confirm that the amount of ₹{selectedContractor?.amountCredit} has been credited to my account
-            and I acknowledge receipt of the payment.
+            I hereby confirm that the amount of ₹
+            {selectedTransaction?.transactionAmount.toLocaleString()} has
+            been received and I acknowledge receipt of the payment.
           </Checkbox>
 
           <div className="signature-section">
@@ -251,6 +283,24 @@ const Home: React.FC<HomeProps> = ({ refreshKey = 0 }) => {
           Clear Signature
         </Button>
       </Modal>
+
+      {showNewTransactionModal && (
+        <Modal
+          title="New Transaction"
+          open={showNewTransactionModal}
+          onCancel={() => setShowNewTransactionModal(false)}
+          footer={null}
+          className="transaction-modal"
+          style={{ top: '7vh' }}
+        >
+          <NewTransaction
+            onTransactionSuccess={() => {
+              setShowNewTransactionModal(false);
+              fetchData(); // Refresh data after successful transaction
+            }}
+          />
+        </Modal>
+      )}
     </div>
   );
 };
