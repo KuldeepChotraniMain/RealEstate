@@ -38,6 +38,7 @@ const BuySell = () => {
     const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
     const [selectedDeal, setSelectedDeal] = useState<PropertyDeal | null>(null);
     const [customers, setCustomers] = useState<string[]>([]);
+    const [loading, setLoading] = useState(false);
     const [editForm] = Form.useForm();
     const isMobile = useMediaQuery('(max-width:768px)');
 
@@ -176,11 +177,11 @@ const BuySell = () => {
                     </Space>
                 </div>
                 <div className="deal-details">
-                    <p><strong>Project:</strong> {deal.projectName}</p>
-                    <p><strong>Phone:</strong> {deal.phone}</p>
-                    <p><strong>Type:</strong> {deal.dealType}</p>
-                    <p><strong>Amount:</strong> {deal.transactionAmount.toLocaleString()}</p>
-                    <p><strong>Total Deal:</strong> {deal.dealAmount.toLocaleString()}</p>
+                    <p>Project: <strong>{deal.projectName}</strong></p>
+                    <p>Phone: <strong>{deal.phone}</strong></p>
+                    <p>Type: <strong>{deal.dealType}</strong></p>
+                    <p>Amount: <strong>{deal.transactionAmount.toLocaleString()}</strong></p>
+                    <p>Total Deal: <strong>{deal.dealAmount.toLocaleString()}</strong></p>
                 </div>
             </Card>
         </Col>
