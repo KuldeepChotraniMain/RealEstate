@@ -12,7 +12,8 @@ import {
     Col,
     Space,
     Radio,
-    Alert
+    Alert,
+    Spin
 } from 'antd';
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useMediaQuery } from '@mui/material';
@@ -43,6 +44,7 @@ const BuySell = () => {
     const isMobile = useMediaQuery('(max-width:768px)');
 
     const fetchDeals = async () => {
+        setLoading(true);
         try {
             const response = await dealsAPI.getAll();
             const dealsData = response.data.map((deal: PropertyDeal) => ({
@@ -59,6 +61,8 @@ const BuySell = () => {
         } catch (error) {
             console.error('Error fetching deals:', error);
             message.error('Failed to fetch deals');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -219,24 +223,34 @@ const BuySell = () => {
                             </Button>
                         </Space>
                     </div>
-                    <Table
-                        columns={columns}
-                        dataSource={deals}
-                        pagination={false}
-                        className="deals-table"
-                        onRow={(record) => ({
-                            onClick: () => {
-                                setSelectedDeal(record);
-                                editForm.setFieldsValue(record);
-                            },
-                            style: { cursor: 'pointer' }
-                        })}
-                    />
+                        <Table
+                            columns={columns}
+                            dataSource={deals}
+                            pagination={false}
+                            loading={loading}
+                            className="deals-table"
+                            onRow={(record) => ({
+                                onClick: () => {
+                                    setSelectedDeal(record);
+                                    editForm.setFieldsValue(record);
+                                },
+                                style: { cursor: 'pointer' }
+                            })}
+                        />
                 </>
             ) : (
-                <Row gutter={[16, 16]} className="mobile-cards">
-                    {deals.map(renderMobileCard)}
-                </Row>
+                <div style={{ position: 'relative', minHeight: '200px' }}>
+                    <Spin spinning={loading} style={{
+                        position: loading && deals.length === 0 ? 'absolute' : 'static',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)'
+                    }}>
+                        <Row gutter={[16, 16]} className="mobile-cards">
+                            {deals.map(renderMobileCard)}
+                        </Row>
+                    </Spin>
+                </div>
             )}
 
             {/* Edit Modal */}
